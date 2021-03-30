@@ -58,13 +58,8 @@ If none of those approvers are still appropriate, then changes to that list
 should be approved by the remaining approvers and/or the owning SIG (or
 SIG Architecture for cross-cutting KEPs).
 -->
-# KEP-NNNN: Your short, descriptive title
+# KEP-NNNN: MTLS Certificate issuer
 
-<!--
-This is the title of your KEP. Keep it short, simple, and descriptive. A good
-title can help communicate what the KEP is and should be considered as part of
-any review.
--->
 
 <!--
 A table of contents is helpful for quickly jumping to sections of a KEP and for
@@ -165,6 +160,8 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
+The certificates.k8s.io/v1/CertificateSigningRequest object introduced the concept of signers with the ability to have independent CAs handling certificates for each signer type, analogously to the ingress's `ingressClass`. 
+
 ## Motivation
 
 <!--
@@ -176,6 +173,8 @@ demonstrate the interest in a KEP within the wider Kubernetes community.
 [experience reports]: https://github.com/golang/go/wiki/ExperienceReports
 -->
 
+One of the most common extensions to Kubernetes is the ability to encrypt traffic from pod to pod. This proposal creates a signer that can be used to create MTLS certificates for use in communications between pods, as many teams were doing before the certs/v1 changes from certs/v1beta1
+
 ### Goals
 
 <!--
@@ -183,12 +182,12 @@ List the specific goals of the KEP. What is it trying to achieve? How will we
 know that this has succeeded?
 -->
 
+  * Sign certificates suitable for MTLS between pods.
+  * Compatible with [SPIFFE SVIDs](https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-verifiable-identity-document-svid) and other community-driven certificate standards.
+
 ### Non-Goals
 
-<!--
-What is out of scope for this KEP? Listing non-goals helps to focus discussion
-and make progress.
--->
+This signer is not intended to mint public facing certificates.
 
 ## Proposal
 
@@ -209,6 +208,8 @@ Include as much detail as possible so that people can understand the "how" of
 the system. The goal here is to make this feel real for users without getting
 bogged down.
 -->
+
+Our example customer uses GRPC with 
 
 #### Story 1
 
