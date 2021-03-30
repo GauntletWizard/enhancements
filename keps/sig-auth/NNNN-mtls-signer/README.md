@@ -252,15 +252,15 @@ Client ensures that server provides a valid certificated signed by `kubernetes.i
     a subject alternative name.
   * The certificate on the server pod uniquely identifies the service
     account that the pod is running as.
-  * The sever is is able to load and serve a TLS authenciated session
+  * The server is is able to load and serve a TLS authenciated session
     using the certifiates from the secret using standard application
     cryptographic libraries.
-  * The client is is able to validate the servers TLS certificate
-    using the `kubernetes.io/mlts` CA certificate also inclued in the
-    the secret, again using standard application cryptographic
+  * The client is is able to validate the server's TLS certificate
+    using the `kubernetes.io/mlts` CA certificate which also inclued
+    in the the secret, again using standard application cryptographic
     libraries.
-  * The sever is is able to validate the client's provided client
-    certificate by using he service account information provided in
+  * The server is is able to validate the client's provided client
+    certificate by using the service account information provided in
     the certificate.
 
 
