@@ -160,7 +160,17 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
-The certificates.k8s.io/v1/CertificateSigningRequest object introduced the concept of signers with the ability to have independent CAs handling certificates for each signer type, analogously to the ingress's `ingressClass`. 
+This proposal introduces a new signer to `certificates.k8s.io/v1` that
+is capable of validating and signing certificate signing requests
+(CSRs) that are suitable for securing transport between two entities
+trusted by the cluster.
+
+The `certificates.k8s.io/v1/CertificateSigningRequest` object introduced
+the concept of signers with the ability to have independent CAs
+handling certificates for each signer type, analogously to the
+ingress's `ingressClass`. This proposal adds a new signer
+`kubernetes.io/mlts` that will sign certificates scoped to pods or
+service accounts.
 
 ## Motivation
 
@@ -173,7 +183,14 @@ demonstrate the interest in a KEP within the wider Kubernetes community.
 [experience reports]: https://github.com/golang/go/wiki/ExperienceReports
 -->
 
-One of the most common extensions to Kubernetes is the ability to encrypt traffic from pod to pod. This proposal creates a signer that can be used to create MTLS certificates for use in communications between pods, as many teams were doing before the certs/v1 changes from certs/v1beta1
+One of the most common extensions to Kubernetes is the ability to
+encrypt traffic from pod to pod. This proposal creates a signer that
+can be used to create MTLS certificates for use in communications
+between pods, as many teams were doing before the certs/v1 changes
+from certs/v1beta1.
+
+This signer's CA certificiate would be easily accessible and be used
+as a root of trust for communication that happens within the cluster.
 
 ### Goals
 
@@ -184,10 +201,12 @@ know that this has succeeded?
 
   * Sign certificates suitable for MTLS between pods.
   * Compatible with [SPIFFE SVIDs](https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-verifiable-identity-document-svid) and other community-driven certificate standards.
+  * Scoped widely enough that it can be used with existing TLS1.3 implementations including `["server auth"]` or `["client auth"]`.
 
 ### Non-Goals
 
-This signer is not intended to mint public facing certificates.
+  * This signer is not intended to mint public facing certificates
+  * This signer is not used to define trust relationships between clusters.
 
 ## Proposal
 
@@ -200,6 +219,16 @@ The "Design Details" section below is for the real
 nitty-gritty.
 -->
 
+ * `kubernetes.io/mtls`: signs certificates that can be used as TLS server or client certificates by pods within the cluster.
+   1. Trust distribution: signed certificates must be verifiable by a CA that is well defined and accessible by pods.
+   2. Permitted subjects - no subject restrictions but approvers may choose to not approve or sign.
+   3. Permitted x509 extensions - honors subjectAltName and key usage extensions and discards other extensions.
+   4. Permitted key usages - Must include `["digital signature", "key encipherment"]` and one or more of `["server auth", "client auth"]`.
+   5. Expiration/certificate lifetime - set by the `--mtls-signing-duration` option for the kube-controller-manager implementation of this signer (*).
+   6. CA bit allowed/disallowed - not allowed.
+
+(*) This value will default to `--cluster-signing-duration` if not specified (and for MVP this flag may not be implemented).
+
 ### User Stories (Optional)
 
 <!--
@@ -209,9 +238,31 @@ the system. The goal here is to make this feel real for users without getting
 bogged down.
 -->
 
-Our example customer uses GRPC with 
 
 #### Story 1
+
+Our example customer uses GRPC to communicate between two pods on a cluster (regardless of namespace).
+Client ensures that server provides a valid certificated signed by `kubernetes.io/mlts` CA certificate.
+
+  * The client generates a key for each pod.
+  * Those keys are then signed by teh Kubernetes/mtls signer.
+  * The keys and certificates are then placed into a secret of type
+    `tls` and mounted to the pods.
+  * The certificate on the server pod include `service/servciename` as
+    a subject alternative name.
+  * The certificate on the server pod uniquely identifies the service
+    account that the pod is running as.
+  * The sever is is able to load and serve a TLS authenciated session
+    using the certifiates from the secret using standard application
+    cryptographic libraries.
+  * The client is is able to validate the servers TLS certificate
+    using the `kubernetes.io/mlts` CA certificate also inclued in the
+    the secret, again using standard application cryptographic
+    libraries.
+  * The sever is is able to validate the client's provided client
+    certificate by using he service account information provided in
+    the certificate.
+
 
 #### Story 2
 
@@ -223,6 +274,10 @@ What are some important details that didn't come across above?
 Go in to as much detail as necessary here.
 This might be a good place to talk about core concepts and how they relate.
 -->
+
+This `kubernetes.io/mlts` signer is explictly not using the cluster CA
+and is decoupled from other signers.
+
 
 ### Risks and Mitigations
 
@@ -238,6 +293,8 @@ How will UX be reviewed, and by whom?
 Consider including folks who also work outside the SIG or subproject.
 -->
 
+
+
 ## Design Details
 
 <!--
@@ -246,6 +303,11 @@ change are understandable. This may include API specs (though not always
 required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
+
+
+
+
+
 
 ### Test Plan
 
