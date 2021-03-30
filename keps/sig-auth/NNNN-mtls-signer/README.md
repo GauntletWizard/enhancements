@@ -58,7 +58,7 @@ If none of those approvers are still appropriate, then changes to that list
 should be approved by the remaining approvers and/or the owning SIG (or
 SIG Architecture for cross-cutting KEPs).
 -->
-# KEP-NNNN: MTLS Certificate issuer
+# KEP-NNNN: MTLS Certificate Issuer for Pods
 
 
 <!--
@@ -169,8 +169,13 @@ The `certificates.k8s.io/v1/CertificateSigningRequest` object introduced
 the concept of signers with the ability to have independent CAs
 handling certificates for each signer type, analogously to the
 ingress's `ingressClass`. This proposal adds a new signer
-`kubernetes.io/mlts` that will sign certificates scoped to pods or
+`kubernetes.io/pod-mlts` that will sign certificates scoped to pods or
 service accounts.
+
+Further functionality adds the ability to the node to automatically
+generate, request and auto mount these certifcates upon pod
+admission. The signer will verify and automatially approve the
+properly formatted certificate requests from the node.
 
 ## Motivation
 
@@ -187,10 +192,16 @@ One of the most common extensions to Kubernetes is the ability to
 encrypt traffic from pod to pod. This proposal creates a signer that
 can be used to create MTLS certificates for use in communications
 between pods, as many teams were doing before the certs/v1 changes
-from certs/v1beta1.
+from certs/v1beta1. It further builds into the kubelet the functionality
+to generate keys and certificate requests for each pod it admits.
 
 This signer's CA certificiate would be easily accessible and be used
-as a root of trust for communication that happens within the cluster.
+as a root of trust for communication that happens within the
+cluster. Further, every pod will be create with TLS secrets auto
+mounted that can be used to secure all communication.
+
+By moving the certificate authority for pod communication into the cluster 
+the attack surface is significantly reduced.
 
 ### Goals
 
@@ -199,9 +210,11 @@ List the specific goals of the KEP. What is it trying to achieve? How will we
 know that this has succeeded?
 -->
 
+  * Ensure all pods have TLS certificates available to be used for
+    fully secure pod-to-pod communication.
   * Sign certificates suitable for MTLS between pods.
-  * Compatible with [SPIFFE SVIDs](https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-verifiable-identity-document-svid) and other community-driven certificate standards.
-  * Scoped widely enough that it can be used with existing TLS1.3 implementations including `["server auth"]` or `["client auth"]`.
+  * Scoped widely enough that it can be used with existing TLS1.3
+    implementations including `["server auth"]` or `["client auth"]`.
 
 ### Non-Goals
 
@@ -219,15 +232,37 @@ The "Design Details" section below is for the real
 nitty-gritty.
 -->
 
- * `kubernetes.io/mtls`: signs certificates that can be used as TLS server or client certificates by pods within the cluster.
+ * `kubernetes.io/pod-mtls`: signs certificates that can be used as TLS server or client certificates by pods within the cluster.
    1. Trust distribution: signed certificates must be verifiable by a CA that is well defined and accessible by pods.
-   2. Permitted subjects - no subject restrictions but approvers may choose to not approve or sign.
-   3. Permitted x509 extensions - honors subjectAltName and key usage extensions and discards other extensions.
-   4. Permitted key usages - Must include `["digital signature", "key encipherment"]` and one or more of `["server auth", "client auth"]`.
-   5. Expiration/certificate lifetime - set by the `--mtls-signing-duration` option for the kube-controller-manager implementation of this signer (*).
+   2. Permitted subjects - subject must be the fully-qualified `serviceAccountName` specified by the pod's specification.
+   3. Permitted x509 extensions - constrains subjectAltName and key usage extensions and discards other extensions.
+   4. Permitted key usages - Must be `["digital signature", "key encipherment", "server auth", "client auth"]`.
+   5. Expiration/certificate lifetime - set by the `--pod-mtls-signing-duration` option for the kube-controller-manager implementation of this signer (*).
    6. CA bit allowed/disallowed - not allowed.
 
 (*) This value will default to `--cluster-signing-duration` if not specified (and for MVP this flag may not be implemented).
+
+For each pod with an automatically mounted `serviceAccountToken`, two
+new files are added to
+`/var/run/secrets/kubernetes.io/serviceaccount`, a TLS v1.3 key and a
+signed certificate in PEM encoded ASN.1 format.
+
+The detail of the certificate are as follows:
+  * Signer is the kubernetes master cluster certificate, the same one
+    used to sign client certificates.
+  * Common name is the fully-qualified service account that the pod is running
+    as. I.e., `system:serviceaccount:<namespace>:<serviceaccountname>`.
+  * SubjectAltName contains
+      * An ip address entry with the ip address address of the pod, i.e., `172.17.0.3`.
+	  * A DNS name entry with the fully quailty name of the pod, i.e., `172-17-0-3.default.pod.cluster.local`.
+	  * The DNS names of matching services in multiple commonly used
+        formats matching the pod's DNS policy, i.e., `my-service`,
+        `my-server.my-namespace`, `my-svc.my-namespace.svc.cluster-domain.example`.
+	  * The DNS names for the pod in commonly used formats, i.e. the
+        value returned by hostname. This matches the pod's hostname
+        and subdomain fields as described in the [existing Kubernetes
+        documenation](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/#pod-s-hostname-and-subdomain-fields).
+
 
 ### User Stories (Optional)
 
@@ -259,9 +294,12 @@ Client ensures that server provides a valid certificated signed by `kubernetes.i
     using the `kubernetes.io/mlts` CA certificate also inclued in the
     the secret, again using standard application cryptographic
     libraries.
-  * The sever is is able to validate the client's provided client
-    certificate by using he service account information provided in
+  * The server is is able to validate the client's provided client
+    certificate by using the service account information provided in
     the certificate.
+  * The server furhter verifies that calling pod is running as a
+    service account that has permissions to access the server's
+    resource.
 
 
 #### Story 2
@@ -293,6 +331,13 @@ How will UX be reviewed, and by whom?
 Consider including folks who also work outside the SIG or subproject.
 -->
 
+We are adding functionality to the cluster master, however the impact
+of attack remains the same. The ability to schedule pods for execution
+is the abilty to impersonate or leak secrets. The master and kubelet
+have always had to be trusted to protect secrets, much like the
+underlying hardware is assumed to be trustworthy. Other solutions that
+involve moving TLS and mTLS secrets into a pod do not provide greater
+protection but have much greater attack surfaces.
 
 
 ## Design Details
@@ -304,7 +349,9 @@ required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
 
+On pod admission, the Kubelet will recognize pods that have the automountServiceAccountToken field set to true. Rather than the current implementation where the serviceAccount's default token secret is mounted as a volume, a projected volume would be mounted in it's place, containing the three elements of that secrret (ca.crt, namespace, and token) as well as two addtional files: an automatically generated tls.key and a signed tls.crt file.
 
+Permission would be added to the node role to allow them to create and view CertificateSigningRequests of the appropriate type. As part of pod admission into the node, the node would generate the tls key, then make several calls to the API Server to create the CSR and then gather the signed certificate. The approval and signing steps would be delegated to controller(s) on the API Server
 
 
 
@@ -328,6 +375,10 @@ when drafting this test plan.
 
 [testing-guidelines]: https://git.k8s.io/community/contributors/devel/sig-testing/testing.md
 -->
+
+End to end testing would involve launching pods intended to communicate with each other, returning errors if the certificates failed to validate.
+
+From the node admission standpoint, the mock API Server would expect to recieve a certificateSigningRequest after the node was informed of pod admission.
 
 ### Graduation Criteria
 
@@ -467,6 +518,8 @@ Pick one of these and delete the rest.
 Any change of default behavior may be surprising to users or break existing
 automations, so be extremely careful here.
 -->
+
+New certificates would be mounted in the 
 
 ###### Can the feature be disabled once it has been enabled (i.e. can we roll back the enablement)?
 

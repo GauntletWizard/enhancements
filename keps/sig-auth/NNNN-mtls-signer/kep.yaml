@@ -1,10 +1,11 @@
-title: MTLS Signer for Certificates
+title: MTLS Signer for Pod Certificates
 kep-number: NNNN
 authors:
   - "@gauntletwizard"
   - "@markphahn"
 owning-sig: sig-auth
-participating-sigs: []
+participating-sigs:
+  - "sig-node"
 status: provisional
 creation-date: 2021-03-29
 reviewers:
