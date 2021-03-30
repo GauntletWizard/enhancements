@@ -349,11 +349,20 @@ required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
 
-On pod admission, the Kubelet will recognize pods that have the automountServiceAccountToken field set to true. Rather than the current implementation where the serviceAccount's default token secret is mounted as a volume, a projected volume would be mounted in it's place, containing the three elements of that secrret (ca.crt, namespace, and token) as well as two addtional files: an automatically generated tls.key and a signed tls.crt file.
+On pod admission, the Kubelet will recognize pods that have the
+automountServiceAccountToken field set to true. Rather than the
+current implementation where the serviceAccount's default token secret
+is mounted as a volume, a projected volume would be mounted in it's
+place, containing the three elements of that secrret (ca.crt,
+namespace, and token) as well as two addtional files: an automatically
+generated tls.key and a signed tls.crt file.
 
-Permission would be added to the node role to allow them to create and view CertificateSigningRequests of the appropriate type. As part of pod admission into the node, the node would generate the tls key, then make several calls to the API Server to create the CSR and then gather the signed certificate. The approval and signing steps would be delegated to controller(s) on the API Server
-
-
+Permission would be added to the node role to allow them to create and
+view CertificateSigningRequests of the appropriate type. As part of
+pod admission into the node, the node would generate the tls key, then
+make several calls to the API Server to create the CSR and then gather
+the signed certificate. The approval and signing steps would be
+delegated to controller(s) on the API Server
 
 
 ### Test Plan
@@ -376,9 +385,13 @@ when drafting this test plan.
 [testing-guidelines]: https://git.k8s.io/community/contributors/devel/sig-testing/testing.md
 -->
 
-End to end testing would involve launching pods intended to communicate with each other, returning errors if the certificates failed to validate.
+End to end testing would involve launching pods intended to
+communicate with each other, returning errors if the certificates
+failed to validate.
 
-From the node admission standpoint, the mock API Server would expect to recieve a certificateSigningRequest after the node was informed of pod admission.
+From the node admission standpoint, the mock API Server would expect
+to recieve a certificateSigningRequest after the node was informed of
+pod admission.
 
 ### Graduation Criteria
 
