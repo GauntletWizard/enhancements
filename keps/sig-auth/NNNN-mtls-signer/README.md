@@ -160,17 +160,17 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
-This proposal introduces a new signer to `certificates.k8s.io/v1` that
-is capable of validating and signing certificate signing requests
-(CSRs) that are suitable for securing transport between two entities
-trusted by the cluster.
+This proposal introduces several new signers to `certificates.k8s.io/v1` that
+are capable of validating and signing certificate signing requests (CSRs) that
+are suitable for securing transport between two entities trusted by the
+cluster.
 
-The `certificates.k8s.io/v1/CertificateSigningRequest` object introduced
-the concept of signers with the ability to have independent CAs
-handling certificates for each signer type, analogously to the
-ingress's `ingressClass`. This proposal adds a new signer
-`kubernetes.io/mlts` that will sign certificates scoped to pods or
-service accounts.
+The `certificates.k8s.io/v1/CertificateSigningRequest` object introduced the
+concept of signers with the ability to have independent CAs handling
+certificates for each signer type, analogously to the ingress's `ingressClass`.
+This proposal adds the signers `kubernetes.io/user`,
+`kubernetes.io/serviceaccount`, and `kubernetes.io/service` that will sign
+certificates scoped to users, serviceaccounts, or services respectively.
 
 ## Motivation
 
@@ -183,14 +183,13 @@ demonstrate the interest in a KEP within the wider Kubernetes community.
 [experience reports]: https://github.com/golang/go/wiki/ExperienceReports
 -->
 
-One of the most common extensions to Kubernetes is the ability to
-encrypt traffic from pod to pod. This proposal creates a signer that
-can be used to create MTLS certificates for use in communications
-between pods, as many teams were doing before the certs/v1 changes
-from certs/v1beta1.
+Kubernetes natively supports authentication via MTLS. This proposal creates
+signers that can be used to create MTLS certificates for use in communications
+between users and the cluster, between pods an the cluster, or between two
+pods, as many teams were doing before the certs/v1 changes from certs/v1beta1.
 
-This signer's CA certificiate would be easily accessible and be used
-as a root of trust for communication that happens within the cluster.
+This signer's CA certificiate would be easily accessible and be used as a root
+of trust for communication that happens to the APIServer or within the cluster.
 
 ### Goals
 
@@ -199,7 +198,7 @@ List the specific goals of the KEP. What is it trying to achieve? How will we
 know that this has succeeded?
 -->
 
-  * Sign certificates suitable for MTLS between pods.
+  * Sign certificates suitable for MTLS authentication.
   * Compatible with [SPIFFE SVIDs](https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-verifiable-identity-document-svid) and other community-driven certificate standards.
   * Scoped widely enough that it can be used with existing TLS1.3 implementations including `["server auth"]` or `["client auth"]`.
 
@@ -219,13 +218,30 @@ The "Design Details" section below is for the real
 nitty-gritty.
 -->
 
- * `kubernetes.io/mtls`: signs certificates that can be used as TLS server or client certificates by pods within the cluster.
-   1. Trust distribution: signed certificates must be verifiable by a CA that is well defined and accessible by pods.
-   2. Permitted subjects - no subject restrictions but approvers may choose to not approve or sign.
-   3. Permitted x509 extensions - honors subjectAltName and key usage extensions and discards other extensions.
-   4. Permitted key usages - Must include `["digital signature", "key encipherment"]` and one or more of `["server auth", "client auth"]`.
+ * `kubernetes.io/user`: signs certificates that can be used as client certificates by human users talking to the cluster.
+   1. Trust distribution: signed certificates must be verifiable by the cluster CA.
+   2. Permitted subjects - Subject name must be a valid "user" name.
+   3. Permitted x509 extensions - honors key usage extensions and discards other extensions.
+   4. Permitted key usages - Must be exactly `["digital signature", "key encipherment", "client auth"]`.
    5. Expiration/certificate lifetime - set by the `--mtls-signing-duration` option for the kube-controller-manager implementation of this signer (*).
    6. CA bit allowed/disallowed - not allowed.
+
+ * `kubernetes.io/serviceaccount`: signs certificates that can be used as client certifficates by serviceaccounts within the cluster.
+   1. Trust distribution: signed certificates must be verifiable by the cluster CA.
+   2. Permitted subjects - Subject must match the fully qualified name of a namepsaced serviceaccount, i.e. `system:serviceaccount:default:default` or `system:serviceaccount:kube-system:cluster-autoscaler`
+   3. Permitted x509 extensions - honors subjectAltName and key usage extensions and discards other extensions.
+   4. Permitted key usages - Must include `["digital signature", "key encipherment", "client auth"]` and may include `["server auth"]`.
+   5. Expiration/certificate lifetime - set by the `--mtls-signing-duration` option for the kube-controller-manager implementation of this signer (*).
+   6. CA bit allowed/disallowed - not allowed.
+
+ * `kubernetes.io/service`: signs certificates that can be used as TLS server certificate by pods running as services within the cluster.
+   1. Trust distribution: signed certificates must be verifiable by a CA that is well defined and accessible by pods.
+   2. Permitted subjects - no subject restrictions but approvers may choose to not approve or sign.
+   3. Permitted x509 extensions - honors subjectAltName and key usage extensions and discards other extensions. SubjectAltName must match the format `service.namespace.cluster.local`, where `cluster.local` is the cluster's DNS Suffix.
+   4. Permitted key usages - Must be exactly `["digital signature", "key encipherment", "server auth"]`.
+   5. Expiration/certificate lifetime - set by the `--mtls-signing-duration` option for the kube-controller-manager implementation of this signer (*).
+   6. CA bit allowed/disallowed - not allowed.
+
 
 (*) This value will default to `--cluster-signing-duration` if not specified (and for MVP this flag may not be implemented).
 
@@ -242,10 +258,10 @@ bogged down.
 #### Story 1
 
 Our example customer uses GRPC to communicate between two pods on a cluster (regardless of namespace).
-Client ensures that server provides a valid certificated signed by `kubernetes.io/mlts` CA certificate.
+Client ensures that server provides a valid certificated signed by `kubernetes.io/serviceaccount` CA certificate.
 
   * The client generates a key for each pod.
-  * Those keys are then signed by teh Kubernetes/mtls signer.
+  * Those keys are then signed by the Kubernetes/mtls signer.
   * The keys and certificates are then placed into a secret of type
     `tls` and mounted to the pods.
   * The certificate on the server pod include `service/servciename` as
@@ -328,6 +344,7 @@ when drafting this test plan.
 
 [testing-guidelines]: https://git.k8s.io/community/contributors/devel/sig-testing/testing.md
 -->
+Unit and integration tests consist of a simple set of key generation, authorization, and verification loops. Each test would generate (or use a pre-generated) x509 CSR, create it as a cluster CSR object, approve it and wait for verification. 
 
 ### Graduation Criteria
 
@@ -451,15 +468,9 @@ This section must be completed when targeting alpha to a release.
 Pick one of these and delete the rest.
 -->
 
-- [ ] Feature gate (also fill in values in `kep.yaml`)
-  - Feature gate name:
-  - Components depending on the feature gate:
-- [ ] Other
-  - Describe the mechanism:
-  - Will enabling / disabling the feature require downtime of the control
-    plane?
-  - Will enabling / disabling the feature require downtime or reprovisioning
-    of a node? (Do not assume `Dynamic Kubelet Config` feature is enabled).
+- [X] Feature gate (also fill in values in `kep.yaml`)
+  - Feature gate name: certificates-tls-signers
+  - Components depending on the feature gate: certificates
 
 ###### Does enabling the feature change any default behavior?
 
@@ -476,6 +487,8 @@ feature, can it break the existing applications?).
 
 NOTE: Also set `disable-supported` to `true` or `false` in `kep.yaml`.
 -->
+
+Yes, but valid certificates will remain active for their remaining lifespan.
 
 ###### What happens if we reenable the feature if it was previously rolled back?
 
