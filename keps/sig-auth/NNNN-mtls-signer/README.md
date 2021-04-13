@@ -789,6 +789,10 @@ Major milestones might include:
 Why should this KEP _not_ be implemented?
 -->
 
+Providing the ability to sign certificates with the cluster's CA is fraught with peril. Imporoperly issued certificates can manifest as a variety of ills, including MITM attacks, improper cluster access, and incorrect identity or identity impersonation. These risks are real but they exist through other threat models as well. (Adding these features to Kubernetes addresses those concerns by having a single source of truth, alleviating these concerns.) 
+
+All of this complexity existed in the v1beta1 version of k8s, including being listed as [a feature](https://web.archive.org/web/20181005085009/https://kubernetes.io/docs/tasks/tls/managing-tls-in-a-cluster/) in previous versions of kubernetes.
+
 ## Alternatives
 
 <!--
