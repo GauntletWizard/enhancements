@@ -172,10 +172,10 @@ ingress's `ingressClass`. This proposal adds a new signer
 `kubernetes.io/pod-mlts` that will sign certificates scoped to pods or
 service accounts.
 
-Further functionality adds the ability to the node to automatically
-generate, request and auto mount these certifcates upon pod
-admission. The signer will verify and automatially approve the
-properly formatted certificate requests from the node.
+Further functionality adds the ability to the node to automatically generate,
+request and project these certifcates upon pod admission. The signer will
+verify and automatially approve the properly formatted certificate requests
+from the node.
 
 ## Motivation
 
@@ -188,20 +188,20 @@ demonstrate the interest in a KEP within the wider Kubernetes community.
 [experience reports]: https://github.com/golang/go/wiki/ExperienceReports
 -->
 
-One of the most common extensions to Kubernetes is the ability to
-encrypt traffic from pod to pod. This proposal creates a signer that
-can be used to create MTLS certificates for use in communications
-between pods, as many teams were doing before the certs/v1 changes
-from certs/v1beta1. It further builds into the kubelet the functionality
-to generate keys and certificate requests for each pod it admits.
+One of the most common extensions to Kubernetes is the ability to encrypt
+traffic from pod to pod. This proposal creates a signer that can be used to
+create MTLS certificates for use in communications between pods, as many teams
+were doing before the certs/v1 changes from certs/v1beta1. It further builds
+into the kubelet the functionality to generate keys and certificate requests
+for each pod it admits.
 
-This signer's CA certificiate would be easily accessible and be used
-as a root of trust for communication that happens within the
-cluster. Further, every pod will be create with TLS secrets auto
-mounted that can be used to secure all communication.
+This signer's CA certificiate would be easily accessible and be used as a root
+of trust for communication that happens within the cluster. Further, every pod
+will be create with TLS secrets auto mounted that can be used to secure all
+communication.
 
-By moving the certificate authority for pod communication into the cluster 
-the attack surface is significantly reduced.
+By moving the certificate authority for pod communication into the cluster the
+attack surface is significantly reduced.
 
 ### Goals
 
