@@ -242,6 +242,8 @@ nitty-gritty.
    5. Expiration/certificate lifetime - set by the `--pod-mtls-signing-duration` option for the kube-controller-manager implementation of this signer (*).
    6. CA bit allowed/disallowed - not allowed.
 
+Additionally, the signer should verify that the `spec.username` (the requester's fully-qualified username, controlled by the apiserver) MUST match the node-account of the node that the pod is scheduled to.
+
 (*) This value will default to `--cluster-signing-duration` if not specified (and for MVP this flag may not be implemented).
 
 For each pod with an automatically projected `serviceAccountToken`, two
@@ -340,7 +342,6 @@ have always had to be trusted to protect secrets, much like the
 underlying hardware is assumed to be trustworthy. Other solutions that
 involve moving TLS and mTLS secrets into a pod do not provide greater
 protection but have much greater attack surfaces.
-
 
 ## Design Details
 
