@@ -535,7 +535,8 @@ Any change of default behavior may be surprising to users or break existing
 automations, so be extremely careful here.
 -->
 
-New certificates would be mounted in the 
+New certificates would be mounted in a well-known location, presumably under
+`/var/run/secrets/kubernetes.io` (a reserved namespace).
 
 ###### Can the feature be disabled once it has been enabled (i.e. can we roll back the enablement)?
 
@@ -545,6 +546,10 @@ feature, can it break the existing applications?).
 
 NOTE: Also set `disable-supported` to `true` or `false` in `kep.yaml`.
 -->
+
+Yes, with no effect on applications that were not making use of the feature,
+though applications built to expect it would have unexpected behavior from
+missing files.
 
 ###### What happens if we reenable the feature if it was previously rolled back?
 
