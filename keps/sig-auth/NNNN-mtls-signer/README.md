@@ -215,6 +215,8 @@ know that this has succeeded?
   * Sign certificates suitable for MTLS between pods.
   * Scoped widely enough that it can be used with existing TLS1.3
     implementations including `["server auth"]` or `["client auth"]`.
+  * Automatically (or simply) projected onto all pods in the cluster.
+  * Keys generated on-node
 
 ### Non-Goals
 
@@ -242,7 +244,7 @@ nitty-gritty.
 
 (*) This value will default to `--cluster-signing-duration` if not specified (and for MVP this flag may not be implemented).
 
-For each pod with an automatically mounted `serviceAccountToken`, two
+For each pod with an automatically projected `serviceAccountToken`, two
 new files are added to
 `/var/run/secrets/kubernetes.io/serviceaccount`, a TLS v1.3 key and a
 signed certificate in PEM encoded ASN.1 format.
