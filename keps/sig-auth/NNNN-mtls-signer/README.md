@@ -218,16 +218,77 @@ implementation. What is the desired outcome and how do we measure success?.
 The "Design Details" section below is for the real
 nitty-gritty.
 -->
+This proposal adds a complete set of new controllers that operate on Pods and CertificateSigningRequests as well as a Container Storage Interface used for projecting key material, signed certificates, and trust roots to pods.
 
- * `kubernetes.io/mtls`: signs certificates that can be used as TLS server or client certificates by pods within the cluster.
-   1. Trust distribution: signed certificates must be verifiable by a CA that is well defined and accessible by pods.
-   2. Permitted subjects - no subject restrictions but approvers may choose to not approve or sign.
-   3. Permitted x509 extensions - honors subjectAltName and key usage extensions and discards other extensions.
-   4. Permitted key usages - Must include `["digital signature", "key encipherment"]` and one or more of `["server auth", "client auth"]`.
-   5. Expiration/certificate lifetime - set by the `--mtls-signing-duration` option for the kube-controller-manager implementation of this signer (*).
-   6. CA bit allowed/disallowed - not allowed.
+The additions default workflow of the cluster are as follows: 
+  * A new pod is Created. A built-in Workload-Certificate AdmissionController (similar to the `ServiceAccount` AdmissionController) inspects the pod and adds a projected volume. This projected volume is of type x509Certificate, and includes the name of the signer (“kubernetes.io/workload-certificate”) and the details about the pod (SubjectAlternativeNames)
+  * The kubelet schedules this pod. The CSI Driver begins the creation of the volume by generating a private key and CSR data-structure. It uses this CSR data-structure to create a certificates.k8s.io/v1 CertificateSigningRequest object.
+  * The Workload-Certificate Approval Controller verifies the details on the CSR. It validates that the CSR (both object and data-structure) conforms to the standard laid out in this document, and updates the CSR Object with the approval.
+  * The Workload-Certificate Signing Controller repeats the verification; Re-confirming (probably using the same code) that the CSR conforms to this standard. It then issues the certificate, updating the CSR Object with the signed Certificate.
+
+At a high level, this proposal is focused around a new Signer named “kubernetes.io/workload-certificate”. This signer can be used to automatically provision MTLS certificates that are appropriate for pod-to-pod communication. For compatibility reasons, this signer should be disabled by default at first release, but enabled by a flag and should default to on before `kubernetes.io/legacy-unknown` is disabled.
+  * `kubernetes.io/workload-certificate`: signs certificates that can be used as TLS server or client certificates by pods within the cluster.
+  1. Trust distribution: signed certificates must be verifiable by a CA that is well defined and accessible by pods.
+  1. Permitted subjects - subject must be the fully-qualified `serviceAccountName` specified by the pod's specification.
+  1. Permitted x509 extensions - constrains subjectAltName and key usage extensions and discards other extensions.
+  1. Permitted key usages - Must be `["digital signature", "key encipherment", "server auth", "client auth"]`.
+  1. Expiration/certificate lifetime - set by the `--pod-mtls-signing-duration` option for the kube-controller-manager implementation of this signer (*).
+CA bit allowed/disallowed - not allowed.
 
 (*) This value will default to `--cluster-signing-duration` if not specified (and for MVP this flag may not be implemented).
+
+Under the provided controller, each pod with an automatically projected MTLS Certificate, a new Volume is automatically mounted at `/var/run/secrets/kubernetes.io/workload-certificate`, containing a matching TLS v1.3 key and a signed certificate in PEM encoded ASN.1 format.
+
+The details of the certificate are as follows:
+  * The certificate is signed by a CA corresponding to the signer-name, and the .
+  * Common name is the fully-qualified service account that the pod is running as. I.e., `system:serviceaccount:<namespace>:<serviceaccountname>`.
+  * SubjectAltName contains
+  * An ip address entry with the ip address address of the pod, i.e., `172.17.0.3`.
+  * A DNS name entry with the fully quailty name of the pod, i.e., `172-17-0-3.default.pod.cluster-domain.example`*.
+  * The DNS names of matching services in multiple commonly used formats matching the pod's DNS policy, i.e., `my-service`, `my-server.my-namespace`, `my-svc.my-namespace.svc.cluster-domain.example`*. Matching services are determined at pod creation time.
+  * The DNS names for the pod in commonly used formats, i.e. the value returned by hostname. This matches the pod's hostname and subdomain fields as described in the existing Kubernetes documenation.
+  * a SPIFFE ID https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-id) for the pod, in a well-defined name format. This format should be as `spiffe://cluster-domain.example/ns/<namespace>/sa/<serviceaccountname>` for a given pod’s namepsace and effective serviceaccountname. Cluster domain may or may not be exactly the same identifier as the FQDN.
+
+(*) This presents a new but not unique problem to the cluster; That the cluster known it's own name. We should constrain this as much as possible to this subsystem, though core-dns is already using a cluster-specific DNS Suffix.
+
+#### Admission Controller
+The Workload-certificate Admission Controller is analogous to and complementary to the ServiceAccount AdmissionController. It inspects the pod and adds a projected volume of type x509Certificate, adding the appropriate volumeAttributes to tell the CSI to generate a CSR in the format defined above.
+
+#### x509Certificate CSI
+
+`x509Certificate` is a new Container Storage Interface Driver added with this change. It is recommended to install it by default, but not required. ‘fsType’ should be omitted and is ignored; The volume always mounts as an read-only overlay over a ramfs (Not tmpfs, as that could be written to swap, and the size of these entries is negligible). readOnly is likewise ignored, as is nodePublishSecretRef. volumeAttributes, however, contains interesting decisions. Please refer to rfc5280 for the full definitions
+volumeAttributes must be populated with at least one:
+  * distinguishedName: Any valid x509 DistinguishedName in text form. It’s inclusion is encouraged, but it is discouraged from being unaccompanied by one of the other SubjectAlternativeName entries
+  * uniformResourceIdentifier, dNSName, iPAddress, etc… as defined in RFC5280 Page 38. All of the available definitions should be available. Each represents a LIST of the appropriate type, json encoded. 
+
+The CSI Volume generated by the workload-certificate Admission Controller should match the format specified above.
+
+The CSI is responsible for mounting the completed tuple of Private Key and Certificate in a well known location.
+
+The CSI is also responsible for some other well-known objects. The CSI should provide to the 
+
+#### Approval Controller
+
+The signer’s Approval-controller is responsible for verifying that the format of the CSR data structure generated by the CSI Plugin is exactly as stated above, and does not contain any additional grants, claims, SANs, or attributes.
+
+Additionally, the Approval Controller should verify that the `spec.username` (the requester's fully-qualified username, controlled by the apiserver) MUST match the node-account of the node that the pod is scheduled to.
+
+Once all verification has passed, the approval controller should update the CSR Object with the approval, passing it to the Signing Controller
+
+#### Signing Controller
+
+The signer’s signing controller is responsible for exactly the same verification logic as above. Additionally, the signer should be implemented by copying the relevant information from the CSR to a new template, rather than blindly signing the existing CSR.
+
+The signer’s signing controller is then responsible for updating the CSR Object with the completed certificate. The completed certificate should include not only the direct leaf certificate, but all intermediate certificates required to verify up to the associated trust root. 
+
+The signing controller should be considered to be pluggable; Cloud providers may implement their own, pursuant to the specification, but handling the CA’s key material as they like. Implementations that use HSMs, third-party trust stores like Hashicorp Vault, or cloud provider specific key management solutions are encouraged. Commercial Kubernetes Providers are further encouraged to make this controller optional or tie it to the other controllers described in this doc.
+
+#### Trust Root Object
+
+The trust root object is a new cluster-scoped Object type under the CertificatesV1 objects. Because it is authentication and authorization sensitive, the APIServer should enforce special care around who can update it and what names are allowed. 
+
+The trust root object exists only to provide a CA bundle to the CSI Driver. The CSI Driver is responsible for taking the trust root object and projecting it into the pod’s volume. The CSI is responsible for verifying that the certificates issued by the Signing Controller chain up to the CA Bundle.
+
 
 ### User Stories (Optional)
 
@@ -266,6 +327,8 @@ Client ensures that server provides a valid certificated signed by `kubernetes.i
 
 #### Story 2
 
+A user is running a legacy application on Kubernetes, but still requires trust between the pods. The legacy application’s server is configured to use the Workload-certificates provided private key and certificate, but ignores the CA bundle. The client uses the CA bundle to verify that it is talking to the right server, but ignores it’s provided key, and uses protocol-specific password authentication. MTLS is disabled, and only hostname verification (against the un-suffixed service name) is performed, with the SPIFFE ID Ignored. 
+
 ### Notes/Constraints/Caveats (Optional)
 
 <!--
@@ -293,7 +356,10 @@ How will UX be reviewed, and by whom?
 Consider including folks who also work outside the SIG or subproject.
 -->
 
+How will security be reviewed, and by whom?
+Extensive unit testing must be written. This is of interest to many companies security departments, and should be 
 
+Much trust is left in the apiserver and kubelet. The ability to schedule pods for execution is the ability to impersonate or leak secrets. The master and kubelet have always had to be trusted to protect secrets, much like the underlying hardware is assumed to be trustworthy.
 
 ## Design Details
 
@@ -328,6 +394,13 @@ when drafting this test plan.
 
 [testing-guidelines]: https://git.k8s.io/community/contributors/devel/sig-testing/testing.md
 -->
+
+End to end testing would involve launching pods intended to communicate with each other, returning errors if the certificates failed to validate.
+
+From the node admission standpoint, the mock API Server would expect to receive a certificateSigningRequest after the node was informed of pod admission.
+
+Both the Approval and Signing Controllers should be unit tested with extensive lists of invalid CSRs, including tricky things like null bytes, international domain names and utf-8 character encodings (including invalid codepoints). Fuzzing should be done on their x509 parsing code.
+
 
 ### Graduation Criteria
 
