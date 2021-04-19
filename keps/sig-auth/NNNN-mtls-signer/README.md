@@ -160,17 +160,13 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
-This proposal introduces a new signer to `certificates.k8s.io/v1` that
-is capable of validating and signing certificate signing requests
-(CSRs) that are suitable for securing transport between two entities
-trusted by the cluster.
-
-The `certificates.k8s.io/v1/CertificateSigningRequest` object introduced
-the concept of signers with the ability to have independent CAs
-handling certificates for each signer type, analogously to the
-ingress's `ingressClass`. This proposal adds a new signer
-`kubernetes.io/mlts` that will sign certificates scoped to pods or
-service accounts.
+This proposal introduces native provisioning of mTLS certificates for Kubernetes workloads that are suitable for securing transport between workloads in the cluster.  Specifically, this document seeks to standardize:
+A new certificate signer name (kubernetes.io/workload-certificate), and specified behavior for the types of CertificateSigningRequests that it is expected to auto-approve and sign.
+A new kubelet projected volume source (x509Credential) for exposing unique private keys, signed certificates, and trust anchor sets to pods at launch.
+An annotation (kubernetes.io/use-workload-certificates) that can be used to request injection of a projected x509Certificate volume.
+An opinionated, standard  format for certificates issued to workloads (SPIFFE x509 SVIDs with clear integration into standard kubernetes concepts).
+The concept of a "home" SPIFFE trust domain for each cluster, and integrated controllers to handle the injection, approval, and signing of certificates by this trust domain.
+A mechanism for kube-apiserver to authenticate clients using the issued certificates, and to map their SPIFFE identities in the cluster's home trust domain to standard Kubernetes usernames (system:serviceaccount:foo:bar).
 
 ## Motivation
 
@@ -183,14 +179,13 @@ demonstrate the interest in a KEP within the wider Kubernetes community.
 [experience reports]: https://github.com/golang/go/wiki/ExperienceReports
 -->
 
-One of the most common extensions to Kubernetes is the ability to
-encrypt traffic from pod to pod. This proposal creates a signer that
-can be used to create MTLS certificates for use in communications
-between pods, as many teams were doing before the certs/v1 changes
-from certs/v1beta1.
+One of the most common extensions to Kubernetes is the ability to encrypt traffic from pod to pod. This proposal creates a signer that can be used to create mTLS certificates for use in communications between pods, as many teams were doing before the certs/v1 changes from certs/v1beta1. It further builds support in the kubelet to generate keys and certificate requests for each pod it admits. The ultimate goal is to simplify and standardize the automated creation of pod scoped certificates.
 
-This signer's CA certificiate would be easily accessible and be used
-as a root of trust for communication that happens within the cluster.
+This signer's CA certificate would be easily accessible and be used as a root of trust for communication that happens within the cluster. Further, every pod will be created with TLS secrets auto mounted that can be used to secure all communication.
+
+By moving the certificate authority for pod communication into the cluster the attack surface is significantly reduced. By generating the key on the node itself the chain of custody of the key material is reduced almost as far as it can be.
+
+Projects like [Istio](https://github.com/istio/istio/issues/22161) and [KubeTLS](https://gitlab.com/gauntletwizard_net/kubetls) were already using v1beta1 to generate server certificates for workloads running on the cluster.
 
 ### Goals
 
@@ -199,14 +194,17 @@ List the specific goals of the KEP. What is it trying to achieve? How will we
 know that this has succeeded?
 -->
 
+  * Enable all pods to have X509/TLS certificates available to be used for fully secure pod-to-pod communication.
   * Sign certificates suitable for MTLS between pods.
-  * Compatible with [SPIFFE SVIDs](https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-verifiable-identity-document-svid) and other community-driven certificate standards.
   * Scoped widely enough that it can be used with existing TLS1.3 implementations including `["server auth"]` or `["client auth"]`.
+  * Automatically (or simply) projected onto all pods in the cluster.
 
 ### Non-Goals
 
-  * This signer is not intended to mint public facing certificates
-  * This signer is not used to define trust relationships between clusters.
+  * This proposal does not address minting certificates that chain to a publicly-trusted root.
+  * This proposal does not address configuring the home trust domain of the cluster (it is expected that this will be specific to the Kubernetes distribution).
+  * This proposal does not address configuring trust relationships between clusters that use the same home trust domain. 
+  * This proposal does not address federation between clusters with different home trust domains.
 
 ## Proposal
 
