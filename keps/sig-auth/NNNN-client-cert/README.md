@@ -58,7 +58,7 @@ If none of those approvers are still appropriate, then changes to that list
 should be approved by the remaining approvers and/or the owning SIG (or
 SIG Architecture for cross-cutting KEPs).
 -->
-# KEP-NNNN: MTLS Certificate issuer
+# KEP-NNNN: Service Account Client Certificate issuer
 
 
 <!--
@@ -221,7 +221,7 @@ nitty-gritty.
    1. Trust distribution: signed certificates must be verifiable by the cluster CA.
    2. Permitted subjects - Subject must match the fully qualified name of a namepsaced serviceaccount, i.e. `system:serviceaccount:default:default` or `system:serviceaccount:kube-system:cluster-autoscaler`
    3. Permitted x509 extensions - honors subjectAltName and key usage extensions and discards other extensions.
-   4. Permitted key usages - Must include `["digital signature", "key encipherment", "client auth"]` and may include `["server auth"]`.
+   4. Permitted key usages - Must include `["digital signature", "key encipherment", "client auth"]`.
    5. Expiration/certificate lifetime - set by the `--s-signing-duration` option for the kube-controller-manager implementation of this signer (*).
    6. CA bit allowed/disallowed - not allowed.
 
